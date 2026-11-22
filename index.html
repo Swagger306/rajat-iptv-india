@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101827"><title>Rajat IPTV India</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1220;--panel:#131e30;--line:#26364e;--muted:#9aabc2;--accent:#36c98f}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4ff;font:16px system-ui,sans-serif}
+header{padding:22px max(18px,calc((100% - 1100px)/2));background:#101b2c;border-bottom:1px solid var(--line)}
+h1{font-size:clamp(23px,5vw,34px);margin:0 0 5px}header p{margin:0;color:var(--muted)}
+main{max-width:1100px;margin:auto;padding:20px 16px;display:grid;gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+input,select,button{font:inherit;border-radius:9px;border:1px solid var(--line);padding:11px 12px;background:#0d1727;color:#edf4ff}
+input[type=file]{max-width:100%}button{background:#176b50;border:0;font-weight:650;cursor:pointer}button.secondary{background:#26364e}
+#search{flex:1;min-width:180px}#status{color:var(--muted);font-size:14px;margin-top:10px}
+.layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(260px,.85fr);gap:16px}
+#channels{display:grid;gap:8px;max-height:520px;overflow:auto}
+.channel{display:flex;justify-content:space-between;gap:10px;text-align:left;background:#0d1727;border:1px solid var(--line);padding:11px}
+.channel small{display:block;color:var(--muted);font-weight:400}
+.channel.active{border-color:var(--accent)}.star{background:transparent;color:#ffd76a;padding:3px 8px}
+video{width:100%;aspect-ratio:16/9;background:#000;border-radius:10px}
+.note{color:var(--muted);font-size:13px;line-height:1.5}
+@media(max-width:720px){.layout{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header><h1>📺 Rajat IPTV India</h1><p>Your personal M3U playlist manager</p></header>
+<main>
+<section class="panel">
+<h2>Load your playlist</h2>
+<div class="controls"><input id="file" type="file" accept=".m3u,.m3u8,.txt"><button id="demo" class="secondary">Load demo stream</button></div>
+<div id="status">Choose an M3U/M3U8 playlist file from your device. The playlist is processed locally in your browser.</div>
+<p class="note">Use only playlists and streams you are legally entitled to access. This app does not provide paid-channel access or bundled TV streams.</p>
+</section>
+<section class="layout">
+<div class="panel"><h2>Channels</h2><div class="controls"><input id="search" placeholder="Search channels…"><select id="category"><option value="">All categories</option></select><select id="filter"><option value="all">All</option><option value="fav">Favorites</option></select></div><p id="count" class="note">0 channels</p><div id="channels"></div></div>
+<div class="panel"><h2 id="now">Select a channel</h2><video id="player" controls playsinline></video><p id="detail" class="note">Choose a channel from the list to play it.</p></div>
+</section>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script>
+const $=id=>document.getElementById(id);
+let items=[],active=-1,favs=new Set(JSON.parse(localStorage.getItem('rajat-favs')||'[]')),hls=null;
+function parseM3U(src){
+ const lines=src.split(/\r?\n/);let out=[],meta=null;
+ for(const raw of lines){const line=raw.trim();
+  if(line.startsWith('#EXTINF')){
+   const group=(line.match(/group-title="([^"]*)"/i)||[])[1]||'Uncategorized';
+   const name=line.split(',').slice(1).join(',').trim()||'Unnamed channel';
+   meta={name,group};
+  }else if(line&&!line.startsWith('#')&&meta){out.push({...meta,url:line});meta=null;}
+ }return out;
+}
+function load(list){
+ items=list;active=-1;
+ const cats=[...new Set(items.map(x=>x.group))].sort();
+ $('category').innerHTML='<option value="">All categories</option>';
+ cats.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;$('category').append(o);});
+ render();$('status').textContent='Loaded '+items.length+' channels.';
+}
+function render(){
+ const q=$('search').value.toLowerCase(),cat=$('category').value,only=$('filter').value==='fav';
+ const shown=items.map((x,i)=>({...x,i})).filter(x=>(!q||x.name.toLowerCase().includes(q))&&(!cat||x.group===cat)&&(!only||favs.has(x.url)));
+ $('count').textContent=shown.length+' of '+items.length+' channels';$('channels').innerHTML='';
+ shown.forEach(x=>{
+  const row=document.createElement('div');row.className='controls channel'+(active===x.i?' active':'');
+  const play=document.createElement('button');play.className='secondary';play.style.flex='1';play.style.textAlign='left';
+  const name=document.createElement('span');name.textContent=x.name;
+  const group=document.createElement('small');group.textContent=x.group;play.append(name,group);play.onclick=()=>playChannel(x.i);
+  const star=document.createElement('button');star.className='star';star.textContent=favs.has(x.url)?'★':'☆';star.title='Toggle favorite';
+  star.onclick=()=>{favs.has(x.url)?favs.delete(x.url):favs.add(x.url);localStorage.setItem('rajat-favs',JSON.stringify([...favs]));render();};
+  row.append(play,star);$('channels').append(row);
+ });
+}
+function playChannel(i){
+ const x=items[i];if(!x)return;active=i;$('now').textContent=x.name;$('detail').textContent=x.group+' • '+x.url;render();
+ const v=$('player');if(hls){hls.destroy();hls=null;}
+ if(window.Hls&&Hls.isSupported()&&/\.m3u8($|\?)/i.test(x.url)){
+  hls=new Hls();hls.loadSource(x.url);hls.attachMedia(v);hls.on(Hls.Events.MANIFEST_PARSED,()=>v.play().catch(()=>{}));
+ }else{v.src=x.url;v.play().catch(()=>{});}
+}
+$('file').onchange=async e=>{const f=e.target.files[0];if(f)load(parseM3U(await f.text()));};
+['search','category','filter'].forEach(id=>$(id).addEventListener(id==='search'?'input':'change',render));
+$('demo').onclick=()=>load([{name:'HLS sample test stream',group:'Demo',url:'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'}]);
+</script>
+</body></html>
